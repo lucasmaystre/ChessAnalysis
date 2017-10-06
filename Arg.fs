@@ -1,4 +1,4 @@
-﻿//
+//
 // Copyright (c) 2002-2011 Microsoft Research Ltd.
 //
 // This source code is subject to terms and conditions of the Microsoft Public License. A
@@ -21,14 +21,14 @@ type ArgInfo (name,action,help) =
  member x.Name = name
  member x.ArgType = action
  member x.HelpText = help
- 
+
 exception Bad of string
 exception HelpText of string
 
 [<Sealed>]
 type ArgParser() =
-   static let getUsage specs u =  
-     let sbuf = new System.Text.StringBuilder 100  
+   static let getUsage specs u =
+     let sbuf = new System.Text.StringBuilder 100
      let pstring (s:string) = sbuf.Append s |> ignore
      let pendline s = pstring s; pstring "\n"
      pendline u;
@@ -61,7 +61,7 @@ type ArgParser() =
                   if !cursor + 1 >= nargs then
                     raise(Bad("option "+s+" needs an argument.\n"+getUsage argSpecs usageText));
                   argv.[!cursor+1]
-                
+
               match action with
               | Arg.Unit f ->
                 f ();
@@ -78,7 +78,7 @@ type ArgParser() =
                 cursor := !cursor + 2
               | Arg.Int f ->
                 let arg2 = getSecondArg ()
-                let arg2 = try int32 arg2 with _ -> raise(Bad(getUsage argSpecs usageText)) in  
+                let arg2 = try int32 arg2 with _ -> raise(Bad(getUsage argSpecs usageText)) in
                 f arg2;
                 cursor := !cursor + 2;
               | Arg.Float f ->
@@ -117,8 +117,8 @@ type ArgParser() =
          | Bad h
          | HelpText h ->
              System.Console.Error.WriteLine h;
-             System.Console.Error.Flush();  
+             System.Console.Error.Flush();
              System.Environment.Exit(1);
          | e ->
              reraise()
-   
+

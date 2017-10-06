@@ -8,7 +8,7 @@
 // This source code is subject to terms and conditions of the Microsoft Public License. A
 // copy of the license can be found in the License.html file at the root of this distribution.
 //
-// 
+//
 //--------------------------------------------------------------
 
 open System
@@ -26,7 +26,7 @@ type PlayerData =
         /// Name of the player
         PlayerName  : string
         /// Year of the analysis
-        Year        : int 
+        Year        : int
         /// Mean skill
         Mu          : float
         /// Skill uncertainty
@@ -39,7 +39,7 @@ type ExtendedPlayerData =
         /// Name of the player
         PlayerName      : string
         /// Year of the analysis
-        Year            : int 
+        Year            : int
         /// Mean skill
         SkillMu         : float
         /// Skill uncertainty
@@ -88,7 +88,7 @@ type Model =
 type Analysis =
     | SingleRun
     | ModelSelection
-    
+
 /// Verbosity level
 let verbose = ref true
 /// The type of analysis to perform
@@ -99,7 +99,7 @@ let model = ref FixedDrawMargin
 let csvFile = ref "ChessBase.csv"
 /// The name of the SQL server to use
 let server = ref "camresapga01"
-/// The name of the SQL database to use 
+/// The name of the SQL database to use
 let database = ref "ChessBase"
 /// The prefix to be used for the result table
 let prefix = ref "Result"
@@ -125,24 +125,24 @@ let notSave = ref false
 let delta = ref 0.01
 
 /// A small function which returns the name for the current model
-let ModelName () = 
-    match !model with 
-    | FixedDrawMargin               -> "FixedDrawMargin" 
-    | FixedDrawMargin2              -> "FixedDrawMargin2" 
-    | FixedDrawMarginADFOverYears   -> "FixedDrawMarginADFOverYears" 
-    | FixedDrawMarginADF            -> "FixedDrawMarginADF" 
+let ModelName () =
+    match !model with
+    | FixedDrawMargin               -> "FixedDrawMargin"
+    | FixedDrawMargin2              -> "FixedDrawMargin2"
+    | FixedDrawMarginADFOverYears   -> "FixedDrawMarginADFOverYears"
+    | FixedDrawMarginADF            -> "FixedDrawMarginADF"
     | VariableDrawMargin            -> "VariableDrawMargin"
-    
+
 /// A small function which returns the name for the current analysis
-let AnalysisName () = 
-    match !analysis with 
-    | SingleRun -> "SingleRun" 
+let AnalysisName () =
+    match !analysis with
+    | SingleRun -> "SingleRun"
     | ModelSelection -> "ModelSelection"
-    
+
 
 /// The list of arguments of this application
-let argspec = 
-    [   
+let argspec =
+    [
         ArgInfo("-no-safe",Arg.Set notSave,                                    "Does not save results predictions (default: off)")
         ArgInfo("-q",      Arg.Clear verbose,                                  "Verbosity level off; only works on single runs (default: on)")
         ArgInfo("-N",      Arg.Int (fun n -> noGames := Some (n)),             "First N games only (default: ALL)")
@@ -167,14 +167,14 @@ let argspec =
     ]
 
 /// Saves the result of a fixed draw margin analysis to a SQL table
-let SaveFixedDrawMarginResults (results:Dictionary<string,SortedList<int,Gaussian<_>>>) tablePrefix = 
+let SaveFixedDrawMarginResults (results:Dictionary<string,SortedList<int,Gaussian<_>>>) tablePrefix =
     if !notSave then
-        () 
+        ()
     else
         let sqlSchema = bulkBuild (!server, !database, tablePrefix)
         results |> Seq.iter (fun kvp ->
             let playerName = kvp.Key
-            kvp.Value |> Seq.iter (fun kvp -> 
+            kvp.Value |> Seq.iter (fun kvp ->
                 sqlSchema.Insert
                     {   PlayerName  = playerName
                         Year        = kvp.Key
@@ -186,14 +186,14 @@ let SaveFixedDrawMarginResults (results:Dictionary<string,SortedList<int,Gaussia
         sqlSchema.Flush ()
 
 /// Saves the result of a variable draw margin analysis to a SQL table
-let SaveVariableDrawMarginResults (results:Dictionary<string,SortedList<int,Gaussian<_>*Gaussian<_>>>) tablePrefix = 
-    if !notSave then 
+let SaveVariableDrawMarginResults (results:Dictionary<string,SortedList<int,Gaussian<_>*Gaussian<_>>>) tablePrefix =
+    if !notSave then
         ()
     else
         let sqlSchema = bulkBuild (!server, !database, tablePrefix)
         results |> Seq.iter (fun kvp ->
             let playerName = kvp.Key
-            kvp.Value |> Seq.iter (fun kvp -> 
+            kvp.Value |> Seq.iter (fun kvp ->
                 sqlSchema.Insert
                     {
                         PlayerName         = playerName
@@ -219,30 +219,30 @@ do
 
     /// Allocate the chess dataset
     let cds = ChessDataset ()
-    
+
     printfn "[Reading the dataset]"
     cds.ReadFromCSVFile (!csvFile,!noGames)
 
-    match !analysis with 
-    | SingleRun -> 
-        /// Output some useful info and get the empirical draw probability 
+    match !analysis with
+    | SingleRun ->
+        /// Output some useful info and get the empirical draw probability
         printfn "[Single run on the dataset using model '%s']" (ModelName())
         let p = float (cds.MatchSequence |> Seq.filter (fun mtch -> mtch.Outcome = MatchOutcome.Draw) |> Seq.length) / float (cds.MatchSequence |> Seq.length)
         let chessAnalysisParameters = ChessAnalysisParameters (PriorMuSkill = !muSkill * 1.0<ELOPoints>, PriorSigmaSkill = !sigmaSkill * 1.0<ELOPoints>, PriorMuDrawMargin = !muDrawMargin * 1.0<ELOPoints>, PriorSigmaDrawMargin = !sigmaDrawMargin * 1.0<ELOPoints>, Beta = !beta * 1.0<ELOPoints>, TauSkill = !tauSkill * 1.0<ELOPoints>, TauDrawMargin = !tauDrawMargin * 1.0<ELOPoints>, DrawProbability = p)
         printfn "[Parameters used]"
         printfn "%O" chessAnalysisParameters
-        
-        match !model with 
+
+        match !model with
         | FixedDrawMargin ->
             let (results,logZ) = cds.FixedDrawMarginAnalyse chessAnalysisParameters !verbose
             SaveFixedDrawMarginResults results (!prefix + ModelName())
         | FixedDrawMargin2 ->
             let (results,logZ) = cds.FixedDrawMarginAnalyse2 chessAnalysisParameters !verbose
             SaveFixedDrawMarginResults results (!prefix + ModelName())
-        | FixedDrawMarginADFOverYears -> 
+        | FixedDrawMarginADFOverYears ->
             let results = cds.FixedDrawMarginADFAnalyse chessAnalysisParameters true !verbose
             SaveFixedDrawMarginResults results (!prefix + ModelName())
-        | FixedDrawMarginADF -> 
+        | FixedDrawMarginADF ->
             let results = cds.FixedDrawMarginADFAnalyse chessAnalysisParameters false !verbose
             SaveFixedDrawMarginResults results (!prefix + ModelName())
         | VariableDrawMargin ->
@@ -250,12 +250,12 @@ do
             SaveVariableDrawMarginResults results (!prefix + ModelName())
             ()
             // SaveFixedDrawMarginResults results !prefix
-    | ModelSelection -> 
-        /// Output some useful info and get the empirical draw probability 
+    | ModelSelection ->
+        /// Output some useful info and get the empirical draw probability
         printfn "[Model selection run on the dataset using model '%s']" (ModelName())
         let p = float (cds.MatchSequence |> Seq.filter (fun mtch -> mtch.Outcome = MatchOutcome.Draw) |> Seq.length) / float (cds.MatchSequence |> Seq.length)
-        
-        match !model with 
+
+        match !model with
         | FixedDrawMargin ->
             /// Build the result schema
             let resSchema = build (!server, !database, (!prefix + ModelName ()))
@@ -266,7 +266,7 @@ do
             /// Iterate over the range of all beta/tau values
             let betaTauRange = [| for betaF in 2 .. 2 .. 20 do for tauF in 5 .. 5 .. 50 -> ((float betaF)/10.0,(float tauF)/100.0) |]
             /// Map the range to the log normalisation constant
-            betaTauRange |> Array.iteri (fun i (betaF,tauF) -> 
+            betaTauRange |> Array.iteri (fun i (betaF,tauF) ->
                 let chessAnalysisParameters = ChessAnalysisParameters (PriorMuSkill = !muSkill * 1.0<ELOPoints>, PriorSigmaSkill = !sigmaSkill * 1.0<ELOPoints>, Beta = !sigmaSkill*betaF * 1.0<ELOPoints>, TauSkill = !sigmaSkill*tauF * 1.0<ELOPoints>, DrawProbability = p)
                 let (results,logZ) = cds.FixedDrawMarginAnalyse chessAnalysisParameters false
                 printf "%f,%f,%f\n" betaF tauF logZ
@@ -274,8 +274,8 @@ do
                 /// Output the dataset to SQL
                 let tablePrefix = sprintf "%s%d" !prefix i
                 SaveFixedDrawMarginResults results tablePrefix
-                
-                resSchema.Insert 
+
+                resSchema.Insert
                     { BetaFactor      = betaF
                       TauFactor       = tauF
                       LogEvidence     = logZ
@@ -284,9 +284,9 @@ do
             )
         | FixedDrawMargin2 ->
             printfn "Not implemented!"
-        | FixedDrawMarginADFOverYears -> 
+        | FixedDrawMarginADFOverYears ->
             printfn "Not implemented!"
-        | FixedDrawMarginADF -> 
+        | FixedDrawMarginADF ->
             printfn "Not implemented!"
         | VariableDrawMargin ->
             /// Build the result schema
@@ -298,7 +298,7 @@ do
             /// Iterate over the range of all beta/tau values
             let muDrawMarginTauDrawMarginRange = [| for muDrawMarginF in 5 .. 1 .. 10 do for tauDrawMarginF in 5 .. 5 .. 20 -> ((float muDrawMarginF)/10.0,(float tauDrawMarginF)/100.0) |]
             /// Map the range to the log normalisation constant
-            muDrawMarginTauDrawMarginRange |> Array.iteri (fun i (muDrawMarginF,tauDrawMarginF) -> 
+            muDrawMarginTauDrawMarginRange |> Array.iteri (fun i (muDrawMarginF,tauDrawMarginF) ->
                 let sigmaDrawMargin = !beta / 6.0
                 let chessAnalysisParameters = ChessAnalysisParameters (PriorMuSkill = !muSkill * 1.0<ELOPoints>, PriorSigmaSkill = !sigmaSkill * 1.0<ELOPoints>, PriorMuDrawMargin = !beta*muDrawMarginF * 1.0<ELOPoints>, PriorSigmaDrawMargin = sigmaDrawMargin * 1.0<ELOPoints>, Beta = !beta * 1.0<ELOPoints>, TauSkill = !tauSkill * 1.0<ELOPoints>, TauDrawMargin = tauDrawMarginF*sigmaDrawMargin * 1.0<ELOPoints>, DrawProbability = p)
                 let (results,logZ) = cds.VariableDrawMarginAnalyse chessAnalysisParameters false
@@ -307,8 +307,8 @@ do
                 /// Output the dataset to SQL
                 let tablePrefix = sprintf "%s%d" !prefix i
                 SaveVariableDrawMarginResults results tablePrefix
-                
-                resSchema.Insert 
+
+                resSchema.Insert
                     { MuFactor           = muDrawMarginF
                       TauFactor          = tauDrawMarginF
                       LogEvidence        = logZ
