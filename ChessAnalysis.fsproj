@@ -42,7 +42,6 @@
     <StartArguments>-no-safe SmallChessBase.csv</StartArguments>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="SqlSchema.fs" />
     <Compile Include="Infer.fs" />
     <Compile Include="Gaussians.fs" />
     <Compile Include="Chess.fs" />
