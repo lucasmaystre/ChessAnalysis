@@ -2,10 +2,13 @@
 // sqlschema.fs       Exports native records into SQL
 //
 // 2007 written by Ralf Herbrich
-// Microsoft Research Ltd.
+//
+// Copyright (c) 2002-2011 Microsoft Research Ltd.
+//
+// This source code is subject to terms and conditions of the Microsoft Public License. A
+// copy of the license can be found in the License.html file at the root of this distribution.
+//
 //------------------------------------------------------------
-
-#light
 
 namespace MSRC.Tools.Sql
 
@@ -19,12 +22,10 @@ module SqlSchema =
 
     /// Attribute to indicate the length of a string field
     [<AttributeUsageAttribute(AttributeTargets.Field)>]
-    type SqlStringLengthAttribute =
-        inherit Attribute 
+    type SqlStringLengthAttribute(length:int) =
+        inherit Attribute() 
         /// Maximal length of a string
-        val Length  : int
-        /// Constructs a new attribute with a maximal length of string
-        new length = { Length = length }
+        member __.Length  =length
 
     open System.Text
     open System.Reflection    
@@ -33,7 +34,6 @@ module SqlSchema =
     open System.Data.SqlClient
     open System.Data.SqlTypes
     open Microsoft.FSharp.Reflection
-    open Microsoft.FSharp.Reflection.Value
 
     /// A Sql command schema is an interface for a type to Sql data store commands
     type ISqlCommandSchema<'a> =
@@ -98,7 +98,7 @@ module SqlSchema =
     /// Computes the SQL type from the .NET/F# type. Also returns a list of tables for all enumeration types encountered
     let DotNetTypeToSqlType ty =     
         // The global table that holds all dictionaries of the enum tables
-        let enumTables = new Dictionary<_,_> ()    
+        let enumTables = new Dictionary<_,SortedList<int,string>> ()    
         
         /// Type information of the Sql base types     
         let SqlBaseTypeInfo (t:Type) att =                    
@@ -120,7 +120,7 @@ module SqlSchema =
                     if s.Length > n then
                         raise (new ArgumentException (sprintf "'%s' is too long. Expecting a %d characters long string" s n))
                     else
-                        "'" ^ s.Replace("'","''") ^ "'"
+                        "'" + s.Replace("'","''") + "'"
                 /// The "reader" for .Net strings (with built-in length checks)
                 let GetString (x:obj) = 
                     match x with
@@ -129,11 +129,11 @@ module SqlSchema =
                 { DotNetType = t; DefaultDotNetValue = (box String.Empty); DotNetValue = GetString; SqlTypeName=(sprintf "varchar(%d)" n); SqlValue = PrintSqlString }
                 
             match t with
-            | t when t = typeof<Guid>       -> { DotNetType = t;    DefaultDotNetValue = (box Guid.Empty);          DotNetValue = Id;   SqlTypeName="uniqueidentifier"; SqlValue = (fun x -> "'" ^ (ToString x) ^ "'") } 
-            | t when t = typeof<Boolean>    -> { DotNetType = t;    DefaultDotNetValue = (box false);               DotNetValue = Id;   SqlTypeName="bit";              SqlValue = (fun x -> "'" ^ (ToString x) ^ "'") }
+            | t when t = typeof<Guid>       -> { DotNetType = t;    DefaultDotNetValue = (box Guid.Empty);          DotNetValue = Id;   SqlTypeName="uniqueidentifier"; SqlValue = (fun x -> "'" + (ToString x) + "'") } 
+            | t when t = typeof<Boolean>    -> { DotNetType = t;    DefaultDotNetValue = (box false);               DotNetValue = Id;   SqlTypeName="bit";              SqlValue = (fun x -> "'" + (ToString x) + "'") }
             | t when t = typeof<byte>       -> { DotNetType = t;    DefaultDotNetValue = (box 0uy);                 DotNetValue = Id;   SqlTypeName="tinyint";          SqlValue = ToString }
-            | t when t = typeof<char>       -> { DotNetType = t;    DefaultDotNetValue = (box '?');                 DotNetValue = Id;   SqlTypeName="char";             SqlValue = (fun x -> "'" ^ (ToString x) ^ "'") }
-            | t when t = typeof<DateTime>   -> { DotNetType = t;    DefaultDotNetValue = (box DateTime.MinValue);   DotNetValue = Id;   SqlTypeName="datetime";         SqlValue = (fun x -> "'" ^ (x :?> DateTime).ToString ("s") ^ "'") }
+            | t when t = typeof<char>       -> { DotNetType = t;    DefaultDotNetValue = (box '?');                 DotNetValue = Id;   SqlTypeName="char";             SqlValue = (fun x -> "'" + (ToString x) + "'") }
+            | t when t = typeof<DateTime>   -> { DotNetType = t;    DefaultDotNetValue = (box DateTime.MinValue);   DotNetValue = Id;   SqlTypeName="datetime";         SqlValue = (fun x -> "'" + (x :?> DateTime).ToString ("s") + "'") }
             | t when t = typeof<Decimal>    -> { DotNetType = t;    DefaultDotNetValue = (box Decimal.Zero);        DotNetValue = Id;   SqlTypeName="decimal";          SqlValue = ToString }
             | t when t = typeof<float>      -> { DotNetType = t;    DefaultDotNetValue = (box 0.0);                 DotNetValue = Id;   SqlTypeName="float";            SqlValue = ToString }
             | t when t = typeof<int16>      -> { DotNetType = t;    DefaultDotNetValue = (box 0s);                  DotNetValue = Id;   SqlTypeName="smallint";         SqlValue = ToString }
@@ -150,35 +150,36 @@ module SqlSchema =
         /// Converts a .Net system type into a Sql type
         let rec GetType (ty: Type) att =
             /// Checks if the name type list tl is that of an Enum type
-            let CheckEnum tl = tl |> List.for_all (fun (_,tyl) -> match tyl with | [] -> true | _ -> false)
+            let CheckEnum (tl:Reflection.UnionCaseInfo[])  = tl |> Array.forall (fun uc -> uc.GetFields().Length = 0)
             /// Returns the Enum type (description)
-            let EnumTypeInfo tl = 
-                let _,_,tagLabelToId = GetSumTagConverters ty
+            let EnumTypeInfo (tl:Reflection.UnionCaseInfo[]) = 
                 /// Add all the possible constructor values to the global and local Enum table 
-                tl |> List.iter (fun (label,_) -> 
+                tl |> Seq.iter (fun uc -> 
                     if not (enumTables.ContainsKey (ty.Name)) then enumTables.Add (ty.Name, new SortedList<_,_> ()) 
-                    (enumTables.[ty.Name]).Add (tagLabelToId label, label)
+                    (enumTables.[ty.Name]).Add (uc.Tag, uc.Name)
                 )
                 /// Retrieves the ID of 
-                let tagReader = GetSumTagReader ty
+                let tagReader = FSharpValue.PreComputeUnionTagReader ty
                 let enumIDReader = (fun obj -> string (tagReader obj))
                 { DotNetType = typeof<int>; DefaultDotNetValue = (box 0); DotNetValue = (fun x -> (tagReader x) :> obj); SqlTypeName="int"; SqlValue = enumIDReader }
                 
             if ty.IsArray then
                 SqlArray (GetType (ty.GetElementType()) [||])
-            elif ty |> Type.IsOptionType then
-                let _,_,tagId = (GetSumTagConverters ty) 
-                let f = GetSumRecordReader (ty,tagId "Some")
+            elif ty.IsGenericType && ty.GetGenericTypeDefinition() = typedefof<int option> then
+                let cases = FSharpType.GetUnionCases ty
+                let f = FSharpValue.PreComputeUnionReader cases.[1]
                 SqlOption ((GetType (ty.GetGenericArguments()).[0] att), fun (x:obj) -> (f x).[0] ) 
-            else
-                match ty |> Type.GetInfo with
-                | RecordType tl                 -> 
-                    let atts = ty.GetProperties () |> Seq.map (fun pi -> pi.GetCustomAttributes (true)) |> Seq.to_list
-                    SqlRecord ((List.map2 (fun (name, ty) att -> (name, GetType ty att)) tl atts), GetRecordReader ty)
-                | TupleType tl                  -> SqlRecord ((tl |> List.mapi (fun i ty -> (sprintf "Field%d" i, GetType ty [||]))), GetTupleReader ty)
-                | ObjectType t                  -> SqlBaseType (SqlBaseTypeInfo t att)
-                | SumType tl when CheckEnum tl  -> SqlBaseType (EnumTypeInfo tl)
-                | ti                            -> failwith (sprintf "Unsupported composed type: %O" ti)
+            elif FSharpType.IsRecord ty then 
+                SqlRecord ([ for p in FSharpType.GetRecordFields ty do
+                                  let attr = p.GetCustomAttributes (true) 
+                                  yield (p.Name, GetType ty attr) ], FSharpValue.PreComputeRecordReader ty)
+            elif FSharpType.IsTuple ty then 
+                SqlRecord ([ for (p,i) in FSharpType.GetRecordFields ty  |> Seq.mapi (fun i x -> (x,i)) do
+                                 yield sprintf "Field%d" i, GetType ty [||] ], FSharpValue.PreComputeTupleReader ty)
+            elif FSharpType.IsUnion ty && CheckEnum (FSharpType.GetUnionCases ty) then
+                 SqlBaseType (EnumTypeInfo (FSharpType.GetUnionCases ty))
+            else 
+                SqlBaseType (SqlBaseTypeInfo ty att)
         
         /// Initiate the type finding on type 'a
         let sqlType = GetType ty [||]
@@ -186,17 +187,10 @@ module SqlSchema =
 
     /// Computes a type name for a given .Net/F# type
     let rec TypeName (ty:Type) = 
-        if ty.IsArray then
-            TypeName (ty.GetElementType())
-        elif ty |> Type.IsOptionType then
-            TypeName ((ty.GetGenericArguments()).[0])
-        else
-            match ty |> Type.GetInfo with
-            | RecordType _      -> ty.Name
-            | TupleType _       -> "Tuple" 
-            | SumType _         -> ty.Name
-            | ObjectType t      -> t.Name
-            | _                 -> failwith (sprintf "Unsupported composed type: %O" ty)
+        if ty.IsArray then TypeName (ty.GetElementType())
+        elif ty.IsGenericType && ty.GetGenericTypeDefinition() = typedefof<int option> then TypeName ((ty.GetGenericArguments()).[0])
+        elif FSharpType.IsTuple ty then "Tuple" 
+        else ty.Name
 
     //------------------------------------------------------------------------
     // SQL Type to a SqlCommand schema interpreter
@@ -213,24 +207,24 @@ module SqlSchema =
             
             /// A helper function to recursively build the CREATE statement
             let rec CreateStatementHelper parentName name sqlType = 
-                let foreignKeyText = if parentName = "" then "" else "[" ^ parentName ^ "Id] bigint, "
+                let foreignKeyText = if parentName = "" then "" else "[" + parentName + "Id] bigint, "
                 
                 /// Get the SQL base type information (if there is any) or None
                 let GetSqlBaseTypeInfo (f,t) =
                     match t with 
-                    | SqlOption (SqlBaseType bi,_)  -> Some ("[" ^ f ^ "] " ^ bi.SqlTypeName ^ " NULL")
-                    | SqlBaseType bi                -> Some ("[" ^ f ^ "] " ^ bi.SqlTypeName ^ " NOT NULL")
+                    | SqlOption (SqlBaseType bi,_)  -> Some ("[" + f + "] " + bi.SqlTypeName + " NULL")
+                    | SqlBaseType bi                -> Some ("[" + f + "] " + bi.SqlTypeName + " NOT NULL")
                     | _                             -> None
                 /// Writes the SQL base type information (if there is any) or None
                 let WriteCreateStatementForNonBaseTypes (f,t) =
                     match t with 
                     | SqlOption (SqlBaseType bi,_)  -> Set.empty
                     | SqlBaseType bi                -> Set.empty
-                    | _                             -> CreateStatementHelper name (name ^ f) t
+                    | _                             -> CreateStatementHelper name (name + f) t
                 /// Checks if the fields of a record are all "basic", that is, they never spawn a new table creation in which case
                 /// we do not need an Id column
                 let SimpleRecord fts = 
-                    fts |> List.for_all (fun (_,ty) -> 
+                    fts |> List.forall (fun (_,ty) -> 
                         match ty with 
                         | SqlOption (SqlBaseType _,_)   -> true 
                         | SqlBaseType _                 -> true 
@@ -242,8 +236,8 @@ module SqlSchema =
                     Append "CREATE TABLE ["; Append name; Append "] ("; 
                     if not (SimpleRecord fts) then Append name; Append "Id bigint IDENTITY (1,1), "; 
                     Append foreignKeyText
-                    Append ((fts |> List.choose GetSqlBaseTypeInfo |> String.concat ",") ^ ")\r\n")
-                    fts |> List.fold_left (fun acc x -> Set.union acc (WriteCreateStatementForNonBaseTypes x)) (Set.singleton name)
+                    Append ((fts |> List.choose GetSqlBaseTypeInfo |> String.concat ",") + ")\r\n")
+                    fts |> List.fold (fun acc x -> Set.union acc (WriteCreateStatementForNonBaseTypes x)) (Set.singleton name)
                 | SqlArray t                -> CreateStatementHelper parentName name t
                 | SqlOption(t,_)            -> CreateStatementHelper parentName name t
                 | SqlBaseType bi            -> 
@@ -251,7 +245,7 @@ module SqlSchema =
                     Set.singleton name
                 
             let tables = CreateStatementHelper "" baseTableName sqlType
-            (createText.ToString (), tables |> Set.to_list |> List.map (sprintf "DROP TABLE [%s]") |> String.concat "\r\n")
+            (createText.ToString (), tables |> Set.toList |> List.map (sprintf "DROP TABLE [%s]") |> String.concat "\r\n")
             
 
         /// The CREATE TABLE/INSERT INTO commands for the Enum Id tables
@@ -263,11 +257,11 @@ module SqlSchema =
                     fields 
                         |> Seq.map (fun (row:KeyValuePair<_,_>) -> 
                             sprintf "INSERT INTO [%s] ([%sId], [Name]) VALUES (%d, '%s')" name name row.Key row.Value) 
-                        |> Seq.to_list 
+                        |> Seq.toList 
                         |> String.concat "\r\n"
-                dropCreateCommand ^ "\r\n" ^ insertCommand
+                dropCreateCommand + "\r\n" + insertCommand
             )
-            |> Seq.to_list
+            |> Seq.toList
             |> String.concat "\r\n"
 
         /// Computes the INSERT INTO statements
@@ -297,7 +291,7 @@ module SqlSchema =
                     match t with 
                     | SqlOption (SqlBaseType bi,_)  -> Set.empty
                     | SqlBaseType bi                -> Set.empty                    
-                    | _                             -> WriteInsertStatementHelper (Some (name ^ "Id", "@" ^ name ^ "Id")) (name ^ f) t v
+                    | _                             -> WriteInsertStatementHelper (Some (name + "Id", "@" + name + "Id")) (name + f) t v
                 /// Writes a Sql table row to the string builder
                 let WriteTableRow fts vs = 
                     /// Augment the values with the type information
@@ -328,19 +322,19 @@ module SqlSchema =
                     Append "SET @"; Append name; Append "Id = @@IDENTITY\r\n";
 
                     /// Recurse for all fields that are not base types
-                    List.fold_left2 (fun acc ft v -> Set.union acc (WriteInsertStatementForNonBaseType ft v)) (Set.singleton name) fts vs
+                    List.fold2 (fun acc ft v -> Set.union acc (WriteInsertStatementForNonBaseType ft v)) (Set.singleton name) fts vs
                 
                 match sqlType with 
                 | SqlRecord (fts,reader)     -> 
                     /// Gets the list of values for a record type (either it was a record value or a tuple value)
                     let vs = reader v 
-                    WriteTableRow fts (vs |> Array.to_list)
+                    WriteTableRow fts (vs |> Array.toList)
                 | SqlArray t                -> 
                     /// For an array, match the array and iterate the insert statement of the inner values 
                     match v with 
                     | :? System.Array as va when va.Rank = 1    -> 
                         let vs : obj array = Array.init va.Length (fun i -> va.GetValue(i))
-                        vs |> Array.fold_left (fun acc v -> Set.union acc (WriteInsertStatementHelper baseIdInfo name t (box v))) Set.empty
+                        vs |> Array.fold (fun acc v -> Set.union acc (WriteInsertStatementHelper baseIdInfo name t (box v))) Set.empty
                     | _                     -> Set.empty
                 | SqlOption (t,reader)      ->
                     /// For an option at this level, recurse if there is data
@@ -356,7 +350,7 @@ module SqlSchema =
         {   
             new ISqlCommandSchema<_> with 
                 member this.Create ()       = 
-                    CreateStatement ^ "\r\n" ^ DropCreateInsertEnumStatements
+                    CreateStatement + "\r\n" + DropCreateInsertEnumStatements
                 member this.Drop ()       = 
                     DropStatement 
                 member this.Insert (x:'a)   = 
@@ -368,7 +362,7 @@ module SqlSchema =
                     /// A helper function to print strings via the DECLARE string builder
                     let Append2 (s:string) = declareText.Append (s) |> ignore
                     keyVariables |> Seq.iter (fun s -> Append2 "DECLARE @"; Append2 s; Append2 "Id bigint\r\n")
-                    declareText.ToString () ^ insertIntoText.ToString ()
+                    declareText.ToString () + insertIntoText.ToString ()
         }
 
     //------------------------------------------------------------------------
@@ -390,7 +384,7 @@ module SqlSchema =
                     /// Checks if the fields of a record are all "basic", that is, they never spawn a new table creation in which case
                     /// we do not need an Id column
                     let SimpleRecord fts =
-                        fts |> List.for_all (fun (_,ty) -> 
+                        fts |> List.forall (fun (_,ty) -> 
                             match ty with 
                             | SqlOption (SqlBaseType _,_)   -> true 
                             | SqlBaseType _                 -> true 
@@ -416,7 +410,7 @@ module SqlSchema =
                     /// Generate the primary key column, if necessary
                     let primaryKey = 
                         if not (SimpleRecord fts) then 
-                            let dc = new DataColumn (name ^ "Id", typeof<int64>, ColumnMapping=MappingType.Attribute, AllowDBNull=false, AutoIncrement=true, AutoIncrementStep=1L, AutoIncrementSeed=seed)
+                            let dc = new DataColumn (name + "Id", typeof<int64>, ColumnMapping=MappingType.Attribute, AllowDBNull=false, AutoIncrement=true, AutoIncrementStep=1L, AutoIncrementSeed=seed)
                             dc |> dataTable.Columns.Add
                             dataTable.PrimaryKey <- [| dc |]
                             Some (dc)
@@ -428,8 +422,8 @@ module SqlSchema =
                         match t with 
                         | SqlOption (SqlBaseType bi,_)  -> ()
                         | SqlBaseType bi                -> ()
-                        | _                             -> let key = Some (new DataColumn (tableName ^ "Id", typeof<int64>, ColumnMapping=MappingType.Attribute, AllowDBNull=false))
-                                                           CreateDataTablesHelper (primaryKey, key) (tableName ^ f) t
+                        | _                             -> let key = Some (new DataColumn (tableName + "Id", typeof<int64>, ColumnMapping=MappingType.Attribute, AllowDBNull=false))
+                                                           CreateDataTablesHelper (primaryKey, key) (tableName + f) t
                     /// Get the SQL base type information (if there is any) or None
                     let GetSqlBaseTypeInfo (f,t) =
                         match t with 
@@ -462,7 +456,7 @@ module SqlSchema =
 
             /// Disable all constraints and delete them                
             dataSet.Relations.Clear ()
-            dataSet.Tables |> Seq.cast |> Seq.to_list |> List.rev |> List.iter (fun (dt:DataTable) -> dt.Constraints.Clear ())
+            dataSet.Tables |> Seq.cast |> Seq.toList |> List.rev |> List.iter (fun (dt:DataTable) -> dt.Constraints.Clear ())
             
             /// Add the new data tables (and possibly constraints and relations)
             CreateDataTablesHelper (None, None) baseTableName sqlType
@@ -491,7 +485,7 @@ module SqlSchema =
                         /// Add the row to the table
                         dataRow |> dataTable.Rows.Add
                         /// A temporary copy of the row
-                        let row = Array.zero_create dataRow.ItemArray.Length
+                        let row = Array.zeroCreate dataRow.ItemArray.Length
                         
                         /// Get the .Net type value (if there is any), else returns None
                         let GetDotNetBaseValue t v =
@@ -505,11 +499,11 @@ module SqlSchema =
                         /// Recurses into the creation of new datarows for non-base types
                         let InsertForNonBaseType (f,t) v =
                             if hasIdField then
-                                InsertHelper (Some (dataRow)) (name ^ f) t v
+                                InsertHelper (Some (dataRow)) (name + f) t v
                             else
                                 failwith "InsertForNonBaseType: Id column not generated!"
 
-                        List.fold_left2 (fun (i:int) (f,t) v -> 
+                        List.fold2 (fun (i:int) (f,t) v -> 
                             match GetDotNetBaseValue t v with
                             | Some (d)  ->
                                 row.[i] <- d
@@ -532,7 +526,7 @@ module SqlSchema =
                 match sqlType with 
                 | SqlRecord (fts,reader)     -> 
                     /// Gets the list of values for a record type (either it was a record value or a tuple value)
-                    WriteRow fts (v |> reader |> Array.to_list)
+                    WriteRow fts (v |> reader |> Array.toList)
                 | SqlArray t                -> 
                     /// For an array, match the array and iterate the insert statement of the inner values 
                     match v with 
@@ -575,10 +569,10 @@ module SqlSchema =
         /// The name of the base table
         let baseTableName = TypeName dotNetType
         /// The strongly typed SQL command schema
-        let scs = SqlTypeToISqlCommandSchema sqlType (prefix ^ baseTableName) enumTables
+        let scs = SqlTypeToISqlCommandSchema sqlType (prefix + baseTableName) enumTables
         
         /// Open the connection
-        let conn = new SqlConnection ("Initial Catalog = " ^ database ^ "; Data Source = " ^ server ^ "; Integrated Security = SSPI")
+        let conn = new SqlConnection ("Initial Catalog = " + database + "; Data Source = " + server + "; Integrated Security = SSPI")
         conn.Open ()
         /// Define a general Sql command execution routine
         let Execute s = 
@@ -601,12 +595,12 @@ module SqlSchema =
         /// The name of the base table
         let baseTableName = TypeName dotNetType
         /// The strongly typed SQL command schema
-        let scs = SqlTypeToISqlCommandSchema sqlType (prefix ^ baseTableName) enumTables
+        let scs = SqlTypeToISqlCommandSchema sqlType (prefix + baseTableName) enumTables
         /// The strongly typed Dataset schema
-        let sd = SqlTypeToIDataSetSchema sqlType (prefix ^ baseTableName) enumTables
+        let sd = SqlTypeToIDataSetSchema sqlType (prefix + baseTableName) enumTables
         
         /// Open the connection
-        let connStr = "Initial Catalog = " ^ database ^ "; Data Source = " ^ server ^ "; Integrated Security = SSPI"
+        let connStr = "Initial Catalog = " + database + "; Data Source = " + server + "; Integrated Security = SSPI"
         let conn = new SqlConnection (connStr)
         conn.Open ()
         /// The bulk copy engine

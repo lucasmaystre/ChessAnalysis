@@ -2,10 +2,13 @@
 // gaussians.fs           Gaussian variables and factors
 //
 // 2007/2008 written by Ralf Herbrich
-// Microsoft Research Ltd
+//
+// Copyright (c) 2002-2011 Microsoft Research Ltd.
+//
+// This source code is subject to terms and conditions of the Microsoft Public License. A
+// copy of the license can be found in the License.html file at the root of this distribution.
+//
 //--------------------------------------------------------------
-
-#light
 
 namespace MSRC.Inference.Distributions
 
@@ -30,7 +33,7 @@ type Gaussian<[<Measure>] 'a> =
         /// Mean of the Gaussian
         member this.Mean = this.Mu
         /// Variance of the Gaussian
-        member this.Variance : float<'a^2> = 1.0<_> / this.Precision
+        member this.Variance : float<'a^2> = 1.0 / this.Precision
         /// Standard deviation of the Gaussian
         member this.StandardDeviation = sqrt (this.Variance)
         /// Standard deviation of the Gaussian
@@ -39,7 +42,7 @@ type Gaussian<[<Measure>] 'a> =
         /// Creates a Gaussian in (mean,standard-deviation) coordinates
         static member Create (mu:float<'a>,sigma:float<'a>) = 
             let sigmaSquared = sigma * sigma
-            new Gaussian<'a> (mu / sigmaSquared, 1.0<_> / sigmaSquared)
+            new Gaussian<'a> (mu / sigmaSquared, 1.0 / sigmaSquared)
         /// Multiplies two Gaussians  
         static member ( * ) (a:Gaussian<'a>,b:Gaussian<'a>) = 
             new Gaussian<'a> (a.PrecisionMean + b.PrecisionMean, a.Precision + b.Precision)
@@ -177,7 +180,7 @@ type GaussianFactors<[<Measure>] 'a> () =
     let MessageBag = new DistributionBag<_> (new Gaussian<'a> (0.0<_>, 0.0<_>))
     
     /// Allocates a new Gausian with parameter Mean=mu and Variance=sigma2
-    let GaussianMS (mu:float<'a>,sigma2:float<'a^2>) = new Gaussian<'a> (mu/sigma2, 1.0<_>/sigma2)
+    let GaussianMS (mu:float<'a>,sigma2:float<'a^2>) = new Gaussian<'a> (mu/sigma2, 1.0/sigma2)
 
     /// Sends the message witha given index to a variable and returns the log-normalisation constant
     let SendMessageHelper msgIdx (varIdx,varBag:DistributionBag<Gaussian<'a>>) = 

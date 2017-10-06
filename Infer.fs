@@ -2,10 +2,13 @@
 // Infer.fs           A small factor graph inference library skeleton
 //
 // 2007/2008 written by Ralf Herbrich
-// Microsoft Research Ltd
+//
+// Copyright (c) 2002-2011 Microsoft Research Ltd.
+//
+// This source code is subject to terms and conditions of the Microsoft Public License. A
+// copy of the license can be found in the License.html file at the root of this distribution.
+//
 //--------------------------------------------------------------
-
-#light
 
 namespace MSRC.Inference
 
@@ -71,7 +74,7 @@ module Collections =
         /// Computes the log normalisation constant.
         member this.LogNormalisation = 
             /// Reset the marginals
-            fList |> ResizeArray.iter (fun f -> f.ResetMarginals())        
+            fList |> Seq.iter (fun f -> f.ResetMarginals())        
 
             /// Reconstruct the marginal but count the normalisation factors
             let mutable sumLogZ = 0.0
@@ -84,7 +87,7 @@ module Collections =
             done
             
             /// Get the product of S_i    
-            let sumLogS = fList |> ResizeArray.fold_left (fun acc f -> acc + (f.LogNormalisation ())) 0.0                             
+            let sumLogS = fList |> Seq.fold (fun acc f -> acc + (f.LogNormalisation ())) 0.0                             
             
             sumLogZ + sumLogS
 

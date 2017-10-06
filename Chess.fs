@@ -2,10 +2,13 @@
 // Chess.fs           Chess analysis library
 //
 // 2007/2008 written by Ralf Herbrich
-// Microsoft Research Ltd
+//
+// Copyright (c) 2002-2011 Microsoft Research Ltd.
+//
+// This source code is subject to terms and conditions of the Microsoft Public License. A
+// copy of the license can be found in the License.html file at the root of this distribution.
+//
 //--------------------------------------------------------------
-
-#light
 
 module MSRC.Chess
 
@@ -22,6 +25,7 @@ open MSRC.Inference.Schedule
 //----------------------------------------------------------------------------
 // Chess specific routines
 //----------------------------------------------------------------------------
+[<Measure>] type ELOPoints
 
 /// The possible match outcomes of a Chess match
 type MatchOutcome = 
@@ -43,16 +47,16 @@ type Match =
     }
 
 /// The parameter for an analysis of a Chess outcome data
-type ChessAnalysisParameters<[<Measure>] 'a> () = 
-    let mutable priorMuSkill : float<'a> = 1200.0<_>
-    let mutable priorSigmaSkill : float<'a> = 400.0<_>
-    let mutable beta : float<'a> = 200.0<_>
-    let mutable tauSkill : float<'a> = 40.0<_>
-    let mutable tauDrawMargin : float<'a> = 20.0<_>
-    let mutable priorMuDrawMargin : float<'a> = 300.0<_>
-    let mutable priorSigmaDrawMargin : float<'a> = 100.0<_>
+type ChessAnalysisParameters () = 
+    let mutable priorMuSkill = 1200.0<ELOPoints>
+    let mutable priorSigmaSkill = 400.0<ELOPoints>
+    let mutable beta = 200.0<ELOPoints>
+    let mutable tauSkill = 40.0<ELOPoints>
+    let mutable tauDrawMargin = 20.0<ELOPoints>
+    let mutable priorMuDrawMargin = 300.0<ELOPoints>
+    let mutable priorSigmaDrawMargin = 100.0<ELOPoints>
     let mutable drawProbability = 0.3
-    let mutable delta :float</'a> = 1e-2<_>
+    let mutable delta = 1e-2</ELOPoints>
 
     /// The mean of the prior belief of a Chess player's skill
     member this.PriorMuSkill with get () = priorMuSkill and set v = priorMuSkill <- v        
@@ -91,7 +95,7 @@ type SkillDrawMargin =
     end
 
 /// A chess data-set encapsulates all historical data of chess outcomes 
-type ChessDataset<[<Measure>] 'a> () = 
+type ChessDataset () = 
     /// The internal mapping of player names to player Ids
     let PlayerNamesToPlayerId = new Dictionary<_,_> ()
     /// The internal mapping of player Ids to player names
@@ -161,10 +165,10 @@ type ChessDataset<[<Measure>] 'a> () =
                         }
             }
             |> Seq.truncate (match noGames with None -> Int32.MaxValue | Some (n)  -> n)
-            |> Seq.to_array
+            |> Seq.toArray
         
         /// Sort the matches by time
-        matches |> Array.sort (fun m1 m2 -> m1.Year - m2.Year)
+        matches |> Array.sortInPlaceWith (fun m1 m2 -> m1.Year - m2.Year)
         
         /// Update the internal storage
         Matches <- matches
@@ -173,7 +177,7 @@ type ChessDataset<[<Measure>] 'a> () =
         RecomputeStartEndYear ()
         
     /// Returns an iteration throuh all the matches sorted by year
-    member this.MatchSequence = Matches |> Array.to_seq
+    member this.MatchSequence = Matches |> Array.toSeq
     
     /// Sequencey of player ids
     member this.PlayerIds = playerStartEndYear |> Seq.map (fun kvp -> kvp.Key)
@@ -185,7 +189,7 @@ type ChessDataset<[<Measure>] 'a> () =
     member this.PlayerStartEndYear id = playerStartEndYear.[id]
     
     /// Runs a full forward-backward factor graph analysis on a chess outcome dataset with a fixed draw margin
-    member this.FixedDrawMarginAnalyse (param:ChessAnalysisParameters<'a>) (verbose:bool) = 
+    member this.FixedDrawMarginAnalyse (param:ChessAnalysisParameters) (verbose:bool) = 
         /// Compute the internal parameters
         let priorBeliefPlayerMu = param.PriorMuSkill
         let priorBeliefPlayerVariance = param.PriorSigmaSkill * param.PriorSigmaSkill 
@@ -202,10 +206,10 @@ type ChessDataset<[<Measure>] 'a> () =
         let delta = param.Delta
         
         /// Allocate the dictionary of all relevant variables
-        let varBag = DistributionBag<_> (Gaussian<'a> (0.0<_>, 0.0<_>))
+        let varBag = DistributionBag<_> (Gaussian<ELOPoints> (0.0<_>, 0.0<_>))
         
         /// Allocate new messages
-        let GF = new GaussianFactors<'a> ()
+        let GF = new GaussianFactors<ELOPoints> ()
         
         /// The dictionary of player skills per year per player
         let playerSkillVarIdxDict = Dictionary<_,_> (HashIdentity.Structural)
@@ -252,8 +256,8 @@ type ChessDataset<[<Measure>] 'a> () =
                 ScheduleSeq (skillDynamicsFDict 
                     |> Seq.choose (fun kvp -> let (y,_) = kvp.Key in if y = year then Some (kvp.Value) else None) 
                     |> Seq.map (fun update -> ScheduleStep (update, 0)) 
-                    |> Seq.to_array 
-                    |> Array.to_seq
+                    |> Seq.toArray 
+                    |> Array.toSeq
                 )
             
             /// Now build a loop schedule over all matches
@@ -261,7 +265,7 @@ type ChessDataset<[<Measure>] 'a> () =
             
             /// Check that there is at least one match per year
             if matchesByYear.ContainsKey year then 
-                matchesByYear.[year] |> ResizeArray.iter (fun mtch -> 
+                matchesByYear.[year] |> Seq.iter (fun mtch -> 
                     let blackPerformance = varBag.NewDistribution ()
                     let whitePerformance = varBag.NewDistribution ()
                     let performanceDiff = varBag.NewDistribution ()
@@ -289,7 +293,7 @@ type ChessDataset<[<Measure>] 'a> () =
                     dataScheduleSteps.Add (ScheduleStep (likelBlackF,1))
                     dataScheduleSteps.Add (ScheduleStep (likelWhiteF,1))
                 )
-            let dataSchedule = ScheduleLoop (ScheduleSeq (dataScheduleSteps |> ResizeArray.to_list |> List.to_seq), delta)
+            let dataSchedule = ScheduleLoop (ScheduleSeq (dataScheduleSteps |> Seq.toList |> List.toSeq), delta)
             
             if verbose then printfn "\tFinished building schedule for year %d." year
             
@@ -301,15 +305,15 @@ type ChessDataset<[<Measure>] 'a> () =
                 ScheduleSeq (skillDynamicsFDict 
                     |> Seq.choose (fun kvp -> let (y,_) = kvp.Key in if y = year then Some (kvp.Value) else None) 
                     |> Seq.map (fun update -> ScheduleStep (update, 1)) 
-                    |> Seq.to_array 
-                    |> Array.to_seq
+                    |> Seq.toArray 
+                    |> Array.toSeq
                 )
 
             /// Now connect all the schedules and connect them
-            ScheduleSeq ([| forwardDynamicsSchedule; dataSchedule; nextYearSchedule; dataSchedule; backwardDynamicsSchedule |] |> Array.to_seq)
+            ScheduleSeq ([| forwardDynamicsSchedule; dataSchedule; nextYearSchedule; dataSchedule; backwardDynamicsSchedule |] |> Array.toSeq)
             
         /// Build the full schedule ...
-        let fullSchedule = ScheduleLoop (ScheduleSeq ([| priorSchedule ;BuildSchedule minYear |] |> Array.to_seq), delta)
+        let fullSchedule = ScheduleLoop (ScheduleSeq ([| priorSchedule ;BuildSchedule minYear |] |> Array.toSeq), delta)
         
         /// ... and run it
         if verbose then printfn "[Starting to run the schedule]"
@@ -336,7 +340,7 @@ type ChessDataset<[<Measure>] 'a> () =
 
     /// Runs an ADF factor graph analysis on a chess outcome dataset with a fixed draw margin; 
     /// If the second parameter is true, then, per year, all the factors are iterated until convergence
-    member this.FixedDrawMarginADFAnalyse (param:ChessAnalysisParameters<'a>) (iterateYears:bool) (verbose:bool) = 
+    member this.FixedDrawMarginADFAnalyse (param:ChessAnalysisParameters) (iterateYears:bool) (verbose:bool) = 
         /// Compute the internal parameters
         let priorBeliefPlayerMu = param.PriorMuSkill
         let priorBeliefPlayerVariance = param.PriorSigmaSkill * param.PriorSigmaSkill 
@@ -353,10 +357,10 @@ type ChessDataset<[<Measure>] 'a> () =
         let delta = param.Delta
         
         /// Allocate the dictionary of all relevant variables
-        let varBag = DistributionBag<_> (Gaussian<'a> (0.0<_>, 0.0<_>))
+        let varBag = DistributionBag<_> (Gaussian<ELOPoints> (0.0<_>, 0.0<_>))
         
         /// Allocate new messages
-        let GF = new GaussianFactors<'a> ()
+        let GF = new GaussianFactors<ELOPoints> ()
         
         /// The dictionary of player skills per year per player
         let playerSkillVarIdxDict = Dictionary<_,_> (HashIdentity.Structural)
@@ -403,8 +407,8 @@ type ChessDataset<[<Measure>] 'a> () =
                 ScheduleSeq (skillDynamicsFDict 
                     |> Seq.choose (fun kvp -> let (y,_) = kvp.Key in if y = year then Some (kvp.Value) else None) 
                     |> Seq.map (fun update -> ScheduleStep (update, 0)) 
-                    |> Seq.to_array 
-                    |> Array.to_seq
+                    |> Seq.toArray 
+                    |> Array.toSeq
                 )
             
             /// Now build a loop schedule over all matches
@@ -412,7 +416,7 @@ type ChessDataset<[<Measure>] 'a> () =
             
             /// Check that there is at least one match per year
             if matchesByYear.ContainsKey year then 
-                matchesByYear.[year] |> ResizeArray.iter (fun mtch -> 
+                matchesByYear.[year] |> Seq.iter (fun mtch -> 
                     let blackPerformance = varBag.NewDistribution ()
                     let whitePerformance = varBag.NewDistribution ()
                     let performanceDiff = varBag.NewDistribution ()
@@ -442,9 +446,9 @@ type ChessDataset<[<Measure>] 'a> () =
                 )
             let dataSchedule = 
                 if iterateYears then
-                    ScheduleLoop (ScheduleSeq (dataScheduleSteps |> ResizeArray.to_list |> List.to_seq), delta)
+                    ScheduleLoop (ScheduleSeq (dataScheduleSteps |> Seq.toList |> List.toSeq), delta)
                 else
-                    ScheduleSeq (dataScheduleSteps |> ResizeArray.to_list |> List.to_seq)
+                    ScheduleSeq (dataScheduleSteps |> Seq.toList |> List.toSeq)
             
             if verbose then printfn "\tFinished building schedule for year %d." year
             
@@ -452,10 +456,10 @@ type ChessDataset<[<Measure>] 'a> () =
             let nextYearSchedule = if (year < maxYear) then BuildSchedule (year+1) else ScheduleSeq (Seq.empty)
 
             /// Now connect all the schedules and connect them
-            ScheduleSeq ([| forwardDynamicsSchedule; dataSchedule; nextYearSchedule |] |> Array.to_seq)
+            ScheduleSeq ([| forwardDynamicsSchedule; dataSchedule; nextYearSchedule |] |> Array.toSeq)
             
         /// Build the full schedule ...
-        let fullSchedule = ScheduleSeq ([| priorSchedule ;BuildSchedule minYear |] |> Array.to_seq)
+        let fullSchedule = ScheduleSeq ([| priorSchedule ;BuildSchedule minYear |] |> Array.toSeq)
         
         /// ... and run it
         if verbose then printfn "[Starting to run the schedule]"
@@ -477,7 +481,7 @@ type ChessDataset<[<Measure>] 'a> () =
         playerSkillsPerPlayer
 
     /// Runs an forward-backward factor graph analysis on a chess outcome dataset with a fixed draw margin (but using the positivity factor only)
-    member this.FixedDrawMarginAnalyse2 (param:ChessAnalysisParameters<'a>) (verbose:bool) = 
+    member this.FixedDrawMarginAnalyse2 (param:ChessAnalysisParameters) (verbose:bool) = 
         /// Compute the internal parameters
         let priorBeliefPlayerMu = param.PriorMuSkill
         let priorBeliefPlayerVariance = param.PriorSigmaSkill * param.PriorSigmaSkill 
@@ -494,10 +498,10 @@ type ChessDataset<[<Measure>] 'a> () =
         let delta = param.Delta
         
         /// Allocate the dictionary of all relevant variables
-        let varBag = DistributionBag<_> (Gaussian<'a> (0.0<_>, 0.0<_>))
+        let varBag = DistributionBag<_> (Gaussian<ELOPoints> (0.0<_>, 0.0<_>))
         
         /// Allocate new messages
-        let GF = new GaussianFactors<'a> ()
+        let GF = new GaussianFactors<ELOPoints> ()
                 
         /// The dictionary of player skills per year per player
         let playerSkillVarIdxDict = Dictionary<_,_> (HashIdentity.Structural)
@@ -545,8 +549,8 @@ type ChessDataset<[<Measure>] 'a> () =
                 ScheduleSeq (skillDynamicsFDict 
                     |> Seq.choose (fun kvp -> let (y,_) = kvp.Key in if y = year then Some (kvp.Value) else None) 
                     |> Seq.map (fun update -> ScheduleStep (update, 0)) 
-                    |> Seq.to_array 
-                    |> Array.to_seq
+                    |> Seq.toArray 
+                    |> Array.toSeq
                 )
             
             /// Now build a loop schedule over all matches
@@ -554,7 +558,7 @@ type ChessDataset<[<Measure>] 'a> () =
             
             /// Check that there is at least one match per year
             if matchesByYear.ContainsKey year then 
-                matchesByYear.[year] |> ResizeArray.iter (fun mtch -> 
+                matchesByYear.[year] |> Seq.iter (fun mtch -> 
                     let blackPerformance = varBag.NewDistribution ()
                     let whitePerformance = varBag.NewDistribution ()
                     let likelBlackF = GF.GaussianLikelihoodFactor betaSquared (blackPerformance,varBag) (playerSkillVarIdxDict.[(year,mtch.BlackPlayerId)],varBag) |> factorList.AddFactor
@@ -599,7 +603,7 @@ type ChessDataset<[<Measure>] 'a> () =
                     dataScheduleSteps.Add (ScheduleStep (likelBlackF,1))
                     dataScheduleSteps.Add (ScheduleStep (likelWhiteF,1))
                 )
-            let dataSchedule = ScheduleLoop (ScheduleSeq (dataScheduleSteps |> ResizeArray.to_list |> List.to_seq), delta)
+            let dataSchedule = ScheduleLoop (ScheduleSeq (dataScheduleSteps |> Seq.toList |> List.toSeq), delta)
             
             if verbose then printfn "\tFinished building schedule for year %d." year
             
@@ -611,15 +615,15 @@ type ChessDataset<[<Measure>] 'a> () =
                 ScheduleSeq (skillDynamicsFDict 
                     |> Seq.choose (fun kvp -> let (y,_) = kvp.Key in if y = year then Some (kvp.Value) else None) 
                     |> Seq.map (fun update -> ScheduleStep (update, 1)) 
-                    |> Seq.to_array 
-                    |> Array.to_seq
+                    |> Seq.toArray 
+                    |> Array.toSeq
                 )
 
             /// Now connect all the schedules and connect them
-            ScheduleSeq ([| forwardDynamicsSchedule; dataSchedule; nextYearSchedule; dataSchedule; backwardDynamicsSchedule |] |> Array.to_seq)
+            ScheduleSeq ([| forwardDynamicsSchedule; dataSchedule; nextYearSchedule; dataSchedule; backwardDynamicsSchedule |] |> Array.toSeq)
             
         /// Build the full schedule ...
-        let fullSchedule = ScheduleLoop (ScheduleSeq ([| priorSchedule ;BuildSchedule minYear |] |> Array.to_seq), delta)
+        let fullSchedule = ScheduleLoop (ScheduleSeq ([| priorSchedule ;BuildSchedule minYear |] |> Array.toSeq), delta)
         
         /// ... and run it
         if verbose then printfn "[Starting to run the schedule]"
@@ -645,7 +649,7 @@ type ChessDataset<[<Measure>] 'a> () =
         (playerSkillsPerPlayer,logZ)
         
     /// Runs a full forward-backward factor graph analysis on a chess outcome dataset with a variable draw margin
-    member this.VariableDrawMarginAnalyse (param:ChessAnalysisParameters<'a>) (verbose:bool) = 
+    member this.VariableDrawMarginAnalyse (param:ChessAnalysisParameters) (verbose:bool) = 
         /// Compute the internal parameters
         let priorBeliefPlayerMu = param.PriorMuSkill
         let priorBeliefPlayerVariance = param.PriorSigmaSkill * param.PriorSigmaSkill 
@@ -665,10 +669,10 @@ type ChessDataset<[<Measure>] 'a> () =
         let delta = param.Delta
         
         /// Allocate the dictionary of all relevant variables
-        let varBag = DistributionBag<_> (Gaussian<'a> (0.0<_>, 0.0<_>))
+        let varBag = DistributionBag<_> (Gaussian<ELOPoints> (0.0<_>, 0.0<_>))
         
         /// Allocate new messages
-        let GF = new GaussianFactors<'a> ()
+        let GF = new GaussianFactors<ELOPoints> ()
                 
         /// The dictionary of player skills and draw margins per year per player
         let playerSkillDrawMarginDict = Dictionary<_,_> (HashIdentity.Structural)
@@ -724,14 +728,14 @@ type ChessDataset<[<Measure>] 'a> () =
                     skillDynamicsFDict 
                         |> Seq.choose (fun kvp -> let (y,_) = kvp.Key in if y = year then Some (kvp.Value) else None) 
                         |> Seq.map (fun update -> ScheduleStep (update, 0)) 
-                        |> Seq.to_array 
-                        |> Array.to_seq
+                        |> Seq.toArray 
+                        |> Array.toSeq
                 let drawMarginForwardScheduleSteps = 
                     drawMarginDynamicsFDict
                         |> Seq.choose (fun kvp -> let (y,_) = kvp.Key in if y = year then Some (kvp.Value) else None) 
                         |> Seq.map (fun update -> ScheduleStep (update, 0)) 
-                        |> Seq.to_array 
-                        |> Array.to_seq
+                        |> Seq.toArray 
+                        |> Array.toSeq
                 ScheduleSeq (Seq.append drawMarginForwardScheduleSteps skillForwardScheduleSteps)
             
             /// Now build a loop schedule over all matches
@@ -739,7 +743,7 @@ type ChessDataset<[<Measure>] 'a> () =
             
             /// Check that there is at least one match per year
             if matchesByYear.ContainsKey year then 
-                matchesByYear.[year] |> ResizeArray.iter (fun mtch -> 
+                matchesByYear.[year] |> Seq.iter (fun mtch -> 
                     let blackPerformance = varBag.NewDistribution ()
                     let whitePerformance = varBag.NewDistribution ()
                     let likelBlackF = GF.GaussianLikelihoodFactor betaSquared (blackPerformance,varBag) (playerSkillDrawMarginDict.[(year,mtch.BlackPlayerId)].SkillIdx,varBag) |> factorList.AddFactor
@@ -810,7 +814,7 @@ type ChessDataset<[<Measure>] 'a> () =
                     dataScheduleSteps.Add (ScheduleStep (likelBlackF,1))
                     dataScheduleSteps.Add (ScheduleStep (likelWhiteF,1))
                 ) 
-            let dataSchedule = ScheduleLoop (ScheduleSeq (dataScheduleSteps |> ResizeArray.to_list |> List.to_seq), delta)
+            let dataSchedule = ScheduleLoop (ScheduleSeq (dataScheduleSteps |> Seq.toList |> List.toSeq), delta)
             
             if verbose then printfn "\tFinished building schedule for year %d." year
             
@@ -823,21 +827,21 @@ type ChessDataset<[<Measure>] 'a> () =
                     skillDynamicsFDict 
                         |> Seq.choose (fun kvp -> let (y,_) = kvp.Key in if y = year then Some (kvp.Value) else None) 
                         |> Seq.map (fun update -> ScheduleStep (update, 1)) 
-                        |> Seq.to_array 
-                        |> Array.to_seq
+                        |> Seq.toArray 
+                        |> Array.toSeq
                 let drawMarginBackwardScheduleSteps = 
                     drawMarginDynamicsFDict
                         |> Seq.choose (fun kvp -> let (y,_) = kvp.Key in if y = year then Some (kvp.Value) else None) 
                         |> Seq.map (fun update -> ScheduleStep (update, 1)) 
-                        |> Seq.to_array 
-                        |> Array.to_seq
+                        |> Seq.toArray 
+                        |> Array.toSeq
                 ScheduleSeq (Seq.append drawMarginBackwardScheduleSteps skillBackwardScheduleSteps)    
 
             /// Now connect all the schedules and connect them
-            ScheduleSeq ([| forwardDynamicsSchedule; dataSchedule; nextYearSchedule; dataSchedule; backwardDynamicsSchedule |] |> Array.to_seq)
+            ScheduleSeq ([| forwardDynamicsSchedule; dataSchedule; nextYearSchedule; dataSchedule; backwardDynamicsSchedule |] |> Array.toSeq)
             
         /// Build the full schedule ...
-        let fullSchedule = ScheduleLoop (ScheduleSeq ([| priorSchedule ;BuildSchedule minYear |] |> Array.to_seq), delta)
+        let fullSchedule = ScheduleLoop (ScheduleSeq ([| priorSchedule ;BuildSchedule minYear |] |> Array.toSeq), delta)
         
         /// ... and run it
         if verbose then printfn "[Starting to run the schedule]"
